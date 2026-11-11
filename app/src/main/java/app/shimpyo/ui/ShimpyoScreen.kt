@@ -60,7 +60,7 @@ fun ShimpyoScreen(state: UiState, vm: MainViewModel) {
 @Composable
 private fun DrivingScreen(state: UiState, vm: MainViewModel) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        if (state.demo) DemoBadge()
+        if (state.demo) DemoBadge(state.simulatedClock)
         val s = state.suggestion
         if (s != null) {
             SuggestionCard(s, onAccept = vm::acceptSuggestion, onDismiss = vm::dismissSuggestion)
@@ -122,9 +122,9 @@ private fun BigButton(label: String, modifier: Modifier, secondary: Boolean = fa
 }
 
 @Composable
-private fun DemoBadge() {
+private fun DemoBadge(clock: String?) {
     Text(
-        "시연 모드 · 가상 주행 데이터",
+        "시연 모드 · 가상 주행 데이터" + (clock?.let { " · $it" } ?: ""),
         Modifier.background(MaterialTheme.colorScheme.secondary).padding(horizontal = 12.dp, vertical = 6.dp),
         color = MaterialTheme.colorScheme.onSecondary, fontSize = 18.sp,
     )
@@ -138,7 +138,7 @@ private fun ParkedScreen(state: UiState, vm: MainViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Text("쉼표", fontSize = 40.sp, fontWeight = FontWeight.Bold)
         Text("쉬어야 할 때를 미리 계획하는 차량용 앱", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (state.demo) DemoBadge()
+        if (state.demo) DemoBadge(state.simulatedClock)
 
         if (state.askDrowsiness) {
             Section("아까 운전하면서 졸렸나요?") {
@@ -151,11 +151,22 @@ private fun ParkedScreen(state: UiState, vm: MainViewModel) {
             }
         }
 
-        state.suggestion?.let { s ->
-            Section("쉼터에서 할 일") {
-                s.actions.forEach { Text("· $it", fontSize = 18.sp) }
+        state.restAdvice?.let { s ->
+            val place = s.stop?.stop?.name ?: "쉼터"
+            Section("${place}에서 할 일") {
+                s.actions.forEach { Text("· $it", fontSize = 19.sp) }
+                if (s.condition == Condition.DROWSINESS) {
+                    Spacer(Modifier.height(12.dp))
+                    val left = state.napSecondsLeft
+                    if (left == null) {
+                        Button(onClick = vm::startNap, modifier = Modifier.height(72.dp)) { Text("15분 쪽잠 알람 시작", fontSize = 22.sp) }
+                    } else {
+                        Text("쪽잠 중 · ${left / 60}:${"%02d".format(left % 60)} 뒤에 깨워 드려요", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        OutlinedButton(onClick = vm::cancelNap) { Text("알람 끄기") }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = vm::dismissSuggestion) { Text("닫기") }
+                OutlinedButton(onClick = vm::clearRestAdvice) { Text("닫기") }
             }
         }
 

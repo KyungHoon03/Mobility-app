@@ -52,6 +52,11 @@ data class UiState(
     val naviStatus: String = "",
     val message: String? = null,
     val restStopCount: Int = 0,
+    /** 마지막으로 제안한 쉼터와 할 일. 쉼터에 도착해 주차한 뒤 정차 화면에서 다시 보여 준다. */
+    val restAdvice: Suggestion? = null,
+    val napSecondsLeft: Long? = null,
+    /** 시연 모드의 가상 시각(예: 오후 1:25). */
+    val simulatedClock: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -59,11 +64,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = RecordStore(app)
     private val restStops = RestStopRepository(app)
     private val personalizer = Personalizer()
-    private val planner = RestPlanner(personalizer)
+    private val planner = RestPlanner(personalizer, clock = { now() }, hourOf = { ms -> hourOf(ms) })
     private val ux = UxRestrictionWatcher(app)
     private val realVehicle: VehicleSource = PleosVehicleSource(app)
     private val realNavi: NaviGateway = PleosNaviGateway(app)
     private var demo: DemoDrive? = null
+
+    // 시연 모드는 실제 1초를 주행 1분으로 압축한다. 판단 로직(쿨다운·내기순환 시간 등)도 같은 시계를 쓴다.
+    private var demoStartReal = 0L
+    private var demoBase = 0L
+    private fun now(): Long =
+        if (demo != null) demoBase + (System.currentTimeMillis() - demoStartReal) * DEMO_SPEED else System.currentTimeMillis()
+    private fun hourOf(ms: Long): Int = java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.HOUR_OF_DAY)
+
+    private var napEndsAtReal: Long? = null
+    private val tone by lazy { runCatching { android.media.ToneGenerator(android.media.AudioManager.STREAM_ALARM, 90) }.getOrNull() }
 
     private var settings = Settings()
     private var reports: List<Report> = emptyList()
@@ -103,8 +118,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val passenger = settings.passengerProfileId?.takeIf { hasPassenger(snapshot) || demo != null }
         val newSuggestion = planner.evaluate(snapshot, route, reports, DRIVER, passenger, restStops.stops, settings.caffeineOk)
-        val restrictedByCar = ux.restricted.value
-        val driving = restrictedByCar ?: (snapshot.gear == GearState.DRIVE || snapshot.gear == GearState.REVERSE)
+        val gearDriving = snapshot.gear == GearState.DRIVE || snapshot.gear == GearState.REVERSE
+        // 실제 차량에서는 플랫폼의 주행 제한 상태를 따르고, 시연 모드에서는 가상 기어를 따른다.
+        val driving = if (demo != null) gearDriving else ux.restricted.value ?: gearDriving
+
+        val napLeft = napEndsAtReal?.let { it - System.currentTimeMillis() }
+        if (napLeft != null && napLeft <= 0) {
+            napEndsAtReal = null
+            runCatching { tone?.startTone(android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 3_000) }
+            showMessage("15분이 지났어요. 천천히 일어나 몸을 풀고 출발하세요")
+        }
 
         _ui.update {
             it.copy(
@@ -116,6 +139,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 motionScore = motion,
                 drowsyScore = drowsy,
                 suggestion = newSuggestion ?: it.suggestion,
+                napSecondsLeft = napEndsAtReal?.let { end -> ((end - System.currentTimeMillis()) / 1000).coerceAtLeast(0) },
+                simulatedClock = if (demo != null) clockText(now()) else null,
                 askDrowsiness = planner.pendingDrowsinessQuestion,
                 settings = settings,
                 personal = personalInfo(),
@@ -147,7 +172,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun reportMotionSickness() {
         val profile = settings.passengerProfileId ?: return showMessage("정차 중에 멀미 기록을 연결할 동승자를 먼저 골라 주세요")
         val f = planner.lastFeatures ?: return
-        addReport(Report(System.currentTimeMillis(), Condition.MOTION_SICKNESS, profile, RiskModel.motionSickness(f), f.minutesSinceStart))
+        addReport(Report(now(), Condition.MOTION_SICKNESS, profile, RiskModel.motionSickness(f), f.minutesSinceStart))
         val pick = navi.route.value.location?.let { RestStopSelector.nextAhead(restStops.stops, it) }
         _ui.update {
             it.copy(
@@ -159,17 +184,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 동승자가 "운전자가 졸려 보여요"를 눌렀을 때. */
     fun reportDriverLooksSleepy() {
         val f = planner.lastFeatures ?: return
-        addReport(Report(System.currentTimeMillis(), Condition.DROWSINESS, DRIVER, RiskModel.drowsiness(f), f.minutesSinceStart))
+        addReport(Report(now(), Condition.DROWSINESS, DRIVER, RiskModel.drowsiness(f), f.minutesSinceStart))
         val pick = navi.route.value.location?.let { RestStopSelector.nextAhead(restStops.stops, it) }
         _ui.update {
             it.copy(suggestion = Suggestion(Condition.DROWSINESS, DRIVER, pick, Advice.forCondition(Condition.DROWSINESS, settings.caffeineOk), RiskModel.drowsiness(f), personalizer.threshold(reports, Condition.DROWSINESS, DRIVER)))
+                
         }
     }
+
+    /** 쉼터에서 15분 쪽잠 알람. 15분이 지나면 알림음과 함께 깨운다. */
+    fun startNap() {
+        napEndsAtReal = System.currentTimeMillis() + NAP_MS
+        tick()
+    }
+
+    fun cancelNap() {
+        napEndsAtReal = null
+        tick()
+    }
+
+    fun clearRestAdvice() = _ui.update { it.copy(restAdvice = null) }
 
     /** 주차 후 "아까 졸렸나요?" 응답. */
     fun answerDrowsiness(sleepy: Boolean) {
         if (sleepy) {
-            addReport(Report(System.currentTimeMillis(), Condition.DROWSINESS, DRIVER, lastDrivingDrowsyScore, planner.lastFeatures?.minutesSinceStart ?: 0.0))
+            addReport(Report(now(), Condition.DROWSINESS, DRIVER, lastDrivingDrowsyScore, planner.lastFeatures?.minutesSinceStart ?: 0.0))
             showMessage("기록했어요. 다음 주행부터 이 기록을 반영해 더 일찍 쉼터를 제안해요")
         }
         planner.answeredDrowsinessQuestion()
@@ -178,7 +217,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun acceptSuggestion() {
         val s = _ui.value.suggestion ?: return
         s.stop?.let { navi.addWaypoint(it.stop) } ?: showMessage("가까운 쉼터를 찾지 못했어요. 가능한 안전한 곳에 정차해 주세요")
-        _ui.update { it.copy(suggestion = null) }
+        // 받아들인 쉼터의 할 일을 주차 후 정차 화면에서 다시 보여 준다.
+        _ui.update { it.copy(suggestion = null, restAdvice = s) }
     }
 
     fun dismissSuggestion() = _ui.update { it.copy(suggestion = null) }
@@ -189,11 +229,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleDemo() {
         val d = demo
+        planner.reset()
+        _ui.update { it.copy(suggestion = null, restAdvice = null) }
         if (d == null) {
+            // 시연 시나리오: 오후 1시 출발 → 굽은 길(멀미) → 오후 2시 무렵 단조로운 고속도로(졸음) → 쉼터 주차
+            demoBase = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 13); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            }.timeInMillis
+            demoStartReal = System.currentTimeMillis()
             demo = DemoDrive().also { it.vehicle.start() }
         } else {
             d.vehicle.stop(); demo = null
         }
+    }
+
+    private fun clockText(ms: Long): String {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = ms }
+        val h = c.get(java.util.Calendar.HOUR_OF_DAY)
+        val ampm = if (h < 12) "오전" else "오후"
+        val h12 = if (h % 12 == 0) 12 else h % 12
+        return "$ampm $h12:${"%02d".format(c.get(java.util.Calendar.MINUTE))}"
     }
 
     fun clearMessage() = _ui.update { it.copy(message = null) }
@@ -220,5 +275,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         realVehicle.stop(); realNavi.stop(); ux.stop()
     }
 
-    companion object { const val DRIVER = "driver" }
+    companion object {
+        const val DRIVER = "driver"
+        private const val DEMO_SPEED = 60L
+        private const val NAP_MS = 15 * 60_000L
+    }
 }

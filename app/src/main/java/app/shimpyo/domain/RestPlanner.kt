@@ -68,6 +68,16 @@ class RestPlanner(
         pendingDrowsinessQuestion = false
     }
 
+    /** 시계가 바뀔 때(시연 모드 켜고 끄기) 주행 추적 상태를 처음으로 돌린다. */
+    fun reset() {
+        tripStartMs = null
+        recirculationSinceMs = null
+        lastGear = GearState.UNKNOWN
+        lastSuggestedAt.clear()
+        pendingDrowsinessQuestion = false
+        changeIndex.reset()
+    }
+
     fun features(s: VehicleSnapshot, route: RouteContext): Features {
         val now = clock()
         return Features(

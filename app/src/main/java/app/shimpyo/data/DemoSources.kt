@@ -58,8 +58,13 @@ class DemoDrive {
             vehicleState.update { it.copy(gear = GearState.DRIVE, cabinTempC = 25.5f, recirculationOn = true) }
             while (isActive) {
                 minute += 1
+                if (minute > PARK_AT_MIN) {
+                    // 쉼터에 도착해 주차
+                    vehicleState.update { it.copy(gear = GearState.PARK, steeringAngleDeg = 0f, brakePressed = true) }
+                    break
+                }
                 lat -= 0.004 // 남쪽으로 이동
-                val curvy = minute in 25..45
+                val curvy = minute in 15..35
                 vehicleState.update {
                     it.copy(
                         steeringAngleDeg = if (curvy) (6 * sin(minute * 1.7)).toFloat() else (0.3 * sin(minute * 0.2)).toFloat(),
@@ -84,6 +89,8 @@ class DemoDrive {
             }
         }
     }
+
+    private companion object { const val PARK_AT_MIN = 75 }
 
     private fun stopScript() {
         job?.cancel(); job = null
