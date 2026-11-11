@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature
+        android:name="android.hardware.type.automotive"
+        android:required="true" />
+
+    <!-- Pleos Vehicle SDK: 읽기 권한만 선언 (차량 제어 CONTROL_* 권한은 쓰지 않음) -->
+    <!-- 조향각·브레이크·기어·이번 주행 시간 -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <!-- 좌석별 착석 여부 -->
+    <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
+    <!-- 실내 온도·내기순환 -->
+    <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
+
+    <!-- AAOS 표준 기어 속성(GEAR_SELECTION) 읽기 -->
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+
+    <!-- Pleos NaviHelper SDK: 현재 위치·턴 안내 조회, 경유지 추가 -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
+
+    <application
+        android:name=".ShimpyoApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Shimpyo">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Shimpyo">
+            <!-- 주행 중에도 쓰는 화면이므로 주의 분산 최적화(DO)를 선언하고,
+                 주행 중에는 카드 1장과 큰 버튼만 보여 준다 -->
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

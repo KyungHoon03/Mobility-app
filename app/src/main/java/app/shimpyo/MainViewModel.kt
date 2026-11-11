@@ -1,0 +1,224 @@
+package app.shimpyo
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import app.shimpyo.data.DemoDrive
+import app.shimpyo.data.NaviGateway
+import app.shimpyo.data.PleosNaviGateway
+import app.shimpyo.data.PleosVehicleSource
+import app.shimpyo.data.RecordStore
+import app.shimpyo.data.RestStopRepository
+import app.shimpyo.data.Settings
+import app.shimpyo.data.UxRestrictionWatcher
+import app.shimpyo.data.VehicleSource
+import app.shimpyo.domain.Advice
+import app.shimpyo.domain.Condition
+import app.shimpyo.domain.Features
+import app.shimpyo.domain.GearState
+import app.shimpyo.domain.Personalizer
+import app.shimpyo.domain.Report
+import app.shimpyo.domain.RestPlanner
+import app.shimpyo.domain.RestStopSelector
+import app.shimpyo.domain.RiskModel
+import app.shimpyo.domain.RouteContext
+import app.shimpyo.domain.Suggestion
+import app.shimpyo.domain.VehicleSnapshot
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+data class PersonalInfo(val profileName: String, val condition: Condition, val count: Int, val threshold: Double, val personalized: Boolean)
+
+data class UiState(
+    val driving: Boolean = false,
+    val demo: Boolean = false,
+    val vehicle: VehicleSnapshot = VehicleSnapshot(),
+    val route: RouteContext = RouteContext(),
+    val features: Features? = null,
+    val motionScore: Double = 0.0,
+    val drowsyScore: Double = 0.0,
+    val suggestion: Suggestion? = null,
+    val askDrowsiness: Boolean = false,
+    val settings: Settings = Settings(),
+    val personal: List<PersonalInfo> = emptyList(),
+    val vehicleStatus: String = "",
+    val naviStatus: String = "",
+    val message: String? = null,
+    val restStopCount: Int = 0,
+)
+
+class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val store = RecordStore(app)
+    private val restStops = RestStopRepository(app)
+    private val personalizer = Personalizer()
+    private val planner = RestPlanner(personalizer)
+    private val ux = UxRestrictionWatcher(app)
+    private val realVehicle: VehicleSource = PleosVehicleSource(app)
+    private val realNavi: NaviGateway = PleosNaviGateway(app)
+    private var demo: DemoDrive? = null
+
+    private var settings = Settings()
+    private var reports: List<Report> = emptyList()
+    private var lastDrivingDrowsyScore = 0.0
+
+    private val _ui = MutableStateFlow(UiState())
+    val ui: StateFlow<UiState> = _ui.asStateFlow()
+
+    private val vehicle: VehicleSource get() = demo?.vehicle ?: realVehicle
+    private val navi: NaviGateway get() = demo?.navi ?: realNavi
+
+    init {
+        viewModelScope.launch {
+            val (s, r) = withContext(Dispatchers.IO) { store.load() }
+            settings = s; reports = r
+            tick()
+        }
+        ux.start(); realVehicle.start(); realNavi.start()
+        viewModelScope.launch {
+            var i = 0
+            while (isActive) {
+                // 조향·브레이크 변화를 놓치지 않도록 100ms마다 읽고, 판단은 1초마다 한다.
+                planner.onVehicle(vehicle.snapshot.value)
+                if (i++ % 10 == 0) tick()
+                delay(100)
+            }
+        }
+    }
+
+    private fun tick() {
+        val snapshot = vehicle.snapshot.value
+        val route = navi.route.value
+        val f = planner.features(snapshot, route)
+        val drowsy = RiskModel.drowsiness(f)
+        val motion = RiskModel.motionSickness(f)
+        if (snapshot.gear == GearState.DRIVE) lastDrivingDrowsyScore = drowsy
+
+        val passenger = settings.passengerProfileId?.takeIf { hasPassenger(snapshot) || demo != null }
+        val newSuggestion = planner.evaluate(snapshot, route, reports, DRIVER, passenger, restStops.stops, settings.caffeineOk)
+        val restrictedByCar = ux.restricted.value
+        val driving = restrictedByCar ?: (snapshot.gear == GearState.DRIVE || snapshot.gear == GearState.REVERSE)
+
+        _ui.update {
+            it.copy(
+                driving = driving,
+                demo = demo != null,
+                vehicle = snapshot,
+                route = route,
+                features = f,
+                motionScore = motion,
+                drowsyScore = drowsy,
+                suggestion = newSuggestion ?: it.suggestion,
+                askDrowsiness = planner.pendingDrowsinessQuestion,
+                settings = settings,
+                personal = personalInfo(),
+                vehicleStatus = vehicle.status.value,
+                naviStatus = navi.status.value,
+                restStopCount = restStops.stops.size,
+            )
+        }
+    }
+
+    private fun hasPassenger(s: VehicleSnapshot) = s.occupiedSeats.any { it != app.shimpyo.domain.SeatPos.DRIVER }
+
+    private fun personalInfo(): List<PersonalInfo> = settings.profiles.flatMap { p ->
+        Condition.entries.mapNotNull { c ->
+            val relevant = (c == Condition.DROWSINESS && p.id == DRIVER) || (c == Condition.MOTION_SICKNESS && p.id != DRIVER)
+            if (!relevant) null else PersonalInfo(
+                profileName = p.name,
+                condition = c,
+                count = personalizer.reportCount(reports, c, p.id),
+                threshold = personalizer.threshold(reports, c, p.id),
+                personalized = personalizer.isPersonalized(reports, c, p.id),
+            )
+        }
+    }
+
+    // ---- 사용자 입력 ----
+
+    /** 동승자 쪽에서 누르는 "멀미나요". 기록을 남기고 바로 다음 쉼터를 제안한다. */
+    fun reportMotionSickness() {
+        val profile = settings.passengerProfileId ?: return showMessage("정차 중에 멀미 기록을 연결할 동승자를 먼저 골라 주세요")
+        val f = planner.lastFeatures ?: return
+        addReport(Report(System.currentTimeMillis(), Condition.MOTION_SICKNESS, profile, RiskModel.motionSickness(f), f.minutesSinceStart))
+        val pick = navi.route.value.location?.let { RestStopSelector.nextAhead(restStops.stops, it) }
+        _ui.update {
+            it.copy(
+                suggestion = Suggestion(Condition.MOTION_SICKNESS, profile, pick, Advice.forCondition(Condition.MOTION_SICKNESS, settings.caffeineOk), RiskModel.motionSickness(f), personalizer.threshold(reports, Condition.MOTION_SICKNESS, profile)),
+            )
+        }
+    }
+
+    /** 동승자가 "운전자가 졸려 보여요"를 눌렀을 때. */
+    fun reportDriverLooksSleepy() {
+        val f = planner.lastFeatures ?: return
+        addReport(Report(System.currentTimeMillis(), Condition.DROWSINESS, DRIVER, RiskModel.drowsiness(f), f.minutesSinceStart))
+        val pick = navi.route.value.location?.let { RestStopSelector.nextAhead(restStops.stops, it) }
+        _ui.update {
+            it.copy(suggestion = Suggestion(Condition.DROWSINESS, DRIVER, pick, Advice.forCondition(Condition.DROWSINESS, settings.caffeineOk), RiskModel.drowsiness(f), personalizer.threshold(reports, Condition.DROWSINESS, DRIVER)))
+        }
+    }
+
+    /** 주차 후 "아까 졸렸나요?" 응답. */
+    fun answerDrowsiness(sleepy: Boolean) {
+        if (sleepy) {
+            addReport(Report(System.currentTimeMillis(), Condition.DROWSINESS, DRIVER, lastDrivingDrowsyScore, planner.lastFeatures?.minutesSinceStart ?: 0.0))
+            showMessage("기록했어요. 다음 주행부터 이 기록을 반영해 더 일찍 쉼터를 제안해요")
+        }
+        planner.answeredDrowsinessQuestion()
+    }
+
+    fun acceptSuggestion() {
+        val s = _ui.value.suggestion ?: return
+        s.stop?.let { navi.addWaypoint(it.stop) } ?: showMessage("가까운 쉼터를 찾지 못했어요. 가능한 안전한 곳에 정차해 주세요")
+        _ui.update { it.copy(suggestion = null) }
+    }
+
+    fun dismissSuggestion() = _ui.update { it.copy(suggestion = null) }
+
+    fun selectPassenger(profileId: String?) = updateSettings(settings.copy(passengerProfileId = profileId))
+
+    fun setCaffeineOk(ok: Boolean) = updateSettings(settings.copy(caffeineOk = ok))
+
+    fun toggleDemo() {
+        val d = demo
+        if (d == null) {
+            demo = DemoDrive().also { it.vehicle.start() }
+        } else {
+            d.vehicle.stop(); demo = null
+        }
+    }
+
+    fun clearMessage() = _ui.update { it.copy(message = null) }
+
+    private fun showMessage(m: String) = _ui.update { it.copy(message = m) }
+
+    private fun addReport(r: Report) {
+        reports = reports + r
+        persist()
+    }
+
+    private fun updateSettings(s: Settings) {
+        settings = s
+        persist()
+    }
+
+    private fun persist() {
+        val s = settings; val r = reports
+        viewModelScope.launch(Dispatchers.IO) { store.save(s, r) }
+    }
+
+    override fun onCleared() {
+        demo?.vehicle?.stop()
+        realVehicle.stop(); realNavi.stop(); ux.stop()
+    }
+
+    companion object { const val DRIVER = "driver" }
+}
