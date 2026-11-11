@@ -15,6 +15,8 @@
 
     <!-- AAOS 표준 기어 속성(GEAR_SELECTION) 읽기 -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+    <!-- AAOS 표준 차 속도(PERF_VEHICLE_SPEED) 읽기: 굽은 길·쉼터까지 몇 분인지 계산 -->
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
 
     <!-- Pleos NaviHelper SDK: 현재 위치·턴 안내 조회, 경유지 추가 -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />

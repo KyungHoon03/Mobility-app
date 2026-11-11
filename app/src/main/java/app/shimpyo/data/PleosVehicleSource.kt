@@ -35,7 +35,11 @@ class PleosVehicleSource(context: Context) : VehicleSource {
     private val failures = linkedSetOf<String>()
     private var started = false
     private var usingAaosGear = false
-    private val gearWatcher = AaosGearWatcher(context) { g -> _snapshot.update { it.copy(gear = g) } }
+    private val carProps = AaosPropertyWatcher(
+        context,
+        onGear = { g -> _snapshot.update { it.copy(gear = g) } },
+        onSpeedKph = { v -> _snapshot.update { it.copy(speedKph = v) } },
+    )
 
     private val climateArea = SeatArea(SeatValue.ROW_1_LEFT)
     private val seatAreas = mapOf(
@@ -94,7 +98,9 @@ class PleosVehicleSource(context: Context) : VehicleSource {
         started = true
         safely("조향각") { vehicle.getSteeringWheel().registerSteeringWheelAngle(steeringListener) }
         safely("브레이크") { vehicle.getBrake().registerBrakePedalStatus(brakeListener) }
-        usingAaosGear = gearWatcher.start()
+        carProps.start()
+        usingAaosGear = carProps.gearOk
+        if (!carProps.speedOk) failures += "차 속도"
         @Suppress("DEPRECATION")
         if (!usingAaosGear) {
             // 표준 속성을 쓸 수 없을 때만 Pleos 기어 API로 대신한다.
@@ -116,7 +122,7 @@ class PleosVehicleSource(context: Context) : VehicleSource {
         if (!started) return
         runCatching { vehicle.getSteeringWheel().unregisterSteeringWheelAngle(steeringListener) }
         runCatching { vehicle.getBrake().unregisterBrakePedalStatus(brakeListener) }
-        gearWatcher.stop()
+        carProps.stop()
         @Suppress("DEPRECATION")
         if (!usingAaosGear) runCatching { vehicle.getGear().unregisterGearSelection(gearListener) }
         runCatching { vehicle.getOdometer().unregisterTripCurrentDrivingTime(drivingTimeListener) }

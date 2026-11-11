@@ -1,13 +1,20 @@
 package app.shimpyo.domain
 
-/** 앱이 다루는 두 가지 상태. 진단이 아니라 "쉬어 갈 때"를 계획하기 위한 구분이다. */
+/** 쉼표가 따로 계산하는 두 가지 부담. 진단이 아니라 "언제 함께 쉬어야 하나"를 계획하기 위한 구분이다. */
 enum class Condition { MOTION_SICKNESS, DROWSINESS }
 
 enum class GearState { PARK, DRIVE, REVERSE, NEUTRAL, UNKNOWN }
 
-enum class SeatPos { DRIVER, FRONT_PASSENGER, REAR_LEFT, REAR_CENTER, REAR_RIGHT }
+enum class SeatPos {
+    DRIVER, FRONT_PASSENGER, REAR_LEFT, REAR_CENTER, REAR_RIGHT;
 
-/** Pleos Vehicle SDK에서 읽은 차량 상태 한 장면. 값이 없으면 null. */
+    val isRear: Boolean get() = this == REAR_LEFT || this == REAR_CENTER || this == REAR_RIGHT
+}
+
+/** 탑승자 종류. 운전자는 졸음, 동승자는 멀미를 주로 챙긴다. */
+enum class Role { DRIVER, CHILD, ADULT }
+
+/** Pleos Vehicle SDK·AAOS 표준 속성에서 읽은 차량 상태 한 장면. 값이 없으면 null. */
 data class VehicleSnapshot(
     /** 앞바퀴 조향각(도). 왼쪽이 음수. 핸들 회전각이 아니다. */
     val steeringAngleDeg: Float? = null,
@@ -18,6 +25,8 @@ data class VehicleSnapshot(
     val recirculationOn: Boolean? = null,
     /** 이번 주행 시간(분). */
     val tripDrivingMinutes: Int? = null,
+    /** 차 속도(km/h). AAOS 표준 속성 PERF_VEHICLE_SPEED. */
+    val speedKph: Float? = null,
 )
 
 data class GeoPoint(val lat: Double, val lon: Double)
@@ -31,26 +40,29 @@ data class RouteContext(
     val upcomingTurnDistancesM: List<Double> = emptyList(),
 )
 
-/** 점수 계산에 쓰는 특징값. 모두 차량·내비 데이터에서 만든 "대리지표"이며 생체 측정값이 아니다. */
-data class Features(
-    /** 조향 방향 전환과 브레이크 빈도로 만든 주행 변화 지표 0..1 (실제 가속도 측정 아님). */
-    val drivingChange: Double,
-    /** 앞으로 3km 안의 회전 안내 밀도 0..1. */
-    val curveAhead: Double,
-    val minutesSinceStart: Double,
-    val hourOfDay: Int,
-    val cabinTempC: Double?,
-    val recirculationMinutes: Double,
-)
+/** 차에 탄 한 사람. 좌석은 차가 알려 주고, 누구인지는 출발 전 정차 중에 고른다. */
+data class Passenger(val profileId: String, val role: Role, val seat: SeatPos) {
+    val condition: Condition get() = if (role == Role.DRIVER) Condition.DROWSINESS else Condition.MOTION_SICKNESS
 
-/** 탑승자가 직접 남긴 신호(멀미 버튼, 주차 후 졸음 응답). 개인화의 정답 데이터. */
-data class Report(
+    /** 카드에 쓰는 호칭. 사람이 문장의 주인공이 되도록 한다. */
+    val label: String get() = when (role) {
+        Role.DRIVER -> "운전자님"
+        Role.CHILD -> if (seat.isRear) "뒷좌석 아이" else "앞좌석 아이"
+        Role.ADULT -> if (seat.isRear) "뒷좌석 동승자" else "앞좌석 동승자"
+    }
+
+    val key: String get() = "$profileId|${condition.name}"
+}
+
+/** 쉼터 주차 때 받는 응답. 쉰 시점이 그 사람의 한계보다 앞이었는지 뒤였는지 알려 준다. */
+enum class RestFeedback { ALREADY_UNCOMFORTABLE, JUST_RIGHT, COULD_GO_ON }
+
+/** 학습 기록(성과 지표 계산용). 차 안에만 저장한다. */
+data class CareEvent(
     val timeMs: Long,
-    val condition: Condition,
-    val profileId: String,
-    /** 신호를 남긴 순간의 기본 규칙 점수. */
-    val score: Double,
-    val minutesSinceStart: Double,
+    val key: String,
+    /** "NOW_UNCOMFORTABLE" 또는 RestFeedback 이름. */
+    val kind: String,
+    /** 그 순간 계산된 통 채움 정도(0..). */
+    val load: Double,
 )
-
-data class Profile(val id: String, val name: String)

@@ -1,69 +1,71 @@
 package app.shimpyo.data
 
 import android.content.Context
-import app.shimpyo.domain.Condition
-import app.shimpyo.domain.Profile
-import app.shimpyo.domain.Report
+import app.shimpyo.domain.Calibration
+import app.shimpyo.domain.CareEvent
+import app.shimpyo.domain.Role
+import app.shimpyo.domain.SeatPos
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 data class Settings(
-    val profiles: List<Profile> = listOf(Profile("driver", "운전자"), Profile("p1", "동승자 A"), Profile("p2", "동승자 B")),
-    /** 멀미 기록을 연결할 동승자(출발 전 정차 상태에서 고름). */
-    val passengerProfileId: String? = "p1",
+    /** 좌석마다 누가 앉는지(출발 전 정차 중에 고름). 운전석은 항상 운전자. */
+    val seats: Map<SeatPos, Role> = mapOf(SeatPos.REAR_LEFT to Role.CHILD),
     val caffeineOk: Boolean = true,
+)
+
+data class Records(
+    val settings: Settings = Settings(),
+    /** "프로필|상태" → 학습된 통 크기 범위. */
+    val calibrations: Map<String, Calibration> = emptyMap(),
+    val events: List<CareEvent> = emptyList(),
 )
 
 /**
  * 기록은 차 안(앱 내부 저장소)에만 저장한다. 서버로 보내지 않는다.
  */
 class RecordStore(context: Context) {
-    private val file = File(context.filesDir, "shimpyo.json")
+    private val file = File(context.filesDir, "shimpyo_v2.json")
 
     @Synchronized
-    fun load(): Pair<Settings, List<Report>> {
-        if (!file.exists()) return Settings() to emptyList()
+    fun load(): Records {
+        if (!file.exists()) return Records()
         return runCatching {
             val root = JSONObject(file.readText())
             val s = root.optJSONObject("settings")
-            val profiles = s?.optJSONArray("profiles")?.let { arr ->
-                (0 until arr.length()).map { i -> arr.getJSONObject(i).let { Profile(it.getString("id"), it.getString("name")) } }
-            } ?: Settings().profiles
-            val settings = Settings(
-                profiles = profiles,
-                passengerProfileId = s?.optString("passengerProfileId")?.takeIf { it.isNotEmpty() },
-                caffeineOk = s?.optBoolean("caffeineOk", true) ?: true,
-            )
-            val reports = root.optJSONArray("reports")?.let { arr ->
+            val seats = s?.optJSONObject("seats")?.let { o ->
+                o.keys().asSequence().mapNotNull { k ->
+                    runCatching { SeatPos.valueOf(k) to Role.valueOf(o.getString(k)) }.getOrNull()
+                }.toMap()
+            } ?: Settings().seats
+            val settings = Settings(seats = seats, caffeineOk = s?.optBoolean("caffeineOk", true) ?: true)
+            val cal = root.optJSONObject("calibrations")?.let { o ->
+                o.keys().asSequence().associateWith { k ->
+                    o.getJSONObject(k).let { Calibration(it.getDouble("lo"), it.getDouble("hi"), it.optInt("n")) }
+                }
+            } ?: emptyMap()
+            val events = root.optJSONArray("events")?.let { arr ->
                 (0 until arr.length()).map { i ->
-                    arr.getJSONObject(i).let {
-                        Report(
-                            timeMs = it.getLong("t"),
-                            condition = Condition.valueOf(it.getString("c")),
-                            profileId = it.getString("p"),
-                            score = it.getDouble("s"),
-                            minutesSinceStart = it.getDouble("m"),
-                        )
-                    }
+                    arr.getJSONObject(i).let { CareEvent(it.getLong("t"), it.getString("k"), it.getString("e"), it.getDouble("l")) }
                 }
             } ?: emptyList()
-            settings to reports
-        }.getOrElse { Settings() to emptyList() }
+            Records(settings, cal, events)
+        }.getOrElse { Records() }
     }
 
     @Synchronized
-    fun save(settings: Settings, reports: List<Report>) {
+    fun save(r: Records) {
         val root = JSONObject()
         root.put("settings", JSONObject().apply {
-            put("profiles", JSONArray().apply { settings.profiles.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) } })
-            put("passengerProfileId", settings.passengerProfileId ?: "")
-            put("caffeineOk", settings.caffeineOk)
+            put("seats", JSONObject().apply { r.settings.seats.forEach { (seat, role) -> put(seat.name, role.name) } })
+            put("caffeineOk", r.settings.caffeineOk)
         })
-        root.put("reports", JSONArray().apply {
-            reports.takeLast(500).forEach {
-                put(JSONObject().put("t", it.timeMs).put("c", it.condition.name).put("p", it.profileId).put("s", it.score).put("m", it.minutesSinceStart))
-            }
+        root.put("calibrations", JSONObject().apply {
+            r.calibrations.forEach { (k, c) -> put(k, JSONObject().put("lo", c.lo).put("hi", c.hi).put("n", c.answers)) }
+        })
+        root.put("events", JSONArray().apply {
+            r.events.takeLast(500).forEach { put(JSONObject().put("t", it.timeMs).put("k", it.key).put("e", it.kind).put("l", it.load)) }
         })
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(root.toString())
