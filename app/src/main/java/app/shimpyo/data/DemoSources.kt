@@ -144,9 +144,9 @@ class DemoDrive {
                 publish(steer = (0.3 * sin(routeModel.minute * 0.2)).toFloat())
                 // 굽은 길에서는 한 "분" 안에서 조향을 몇 번 흔들어 주행 변화가 잡히게 한다.
                 if (routeModel.curvyNow && routeModel.gear == GearState.DRIVE) {
-                    repeat(3) { i ->
-                        delay(200)
-                        publish(steer = if (i % 2 == 0) 5f else -5f, brake = i == 1)
+                    repeat(2) { i ->
+                        delay(300)
+                        publish(steer = if (i % 2 == 0) 5f else -5f)
                     }
                     delay(400)
                 } else {

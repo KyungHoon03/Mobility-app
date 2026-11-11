@@ -97,8 +97,10 @@ class CalibrationTest {
     @Test
     fun nowUncomfortableCapsUpperBound() {
         val c = Calibration().onNowUncomfortable(0.55)
-        assertEquals(0.55, c.hi, 1e-9)
+        assertEquals(0.7, c.hi, 1e-9) // 한 번에 30%까지만 내린다
         assertTrue(c.lo < c.hi)
+        val tiny = Calibration().onNowUncomfortable(0.0)
+        assertTrue("$tiny", tiny.hi >= 0.7 && tiny.lo < tiny.hi)
     }
 }
 
@@ -178,7 +180,7 @@ class DemoScenarioTest {
         val child = Passenger("child", Role.CHILD, SeatPos.REAR_LEFT)
         val driver = Passenger("driver", Role.DRIVER, SeatPos.DRIVER)
         val people = listOf(driver, child)
-        val cal = mutableMapOf(child.key to Calibration(0.5, 0.7, 2), driver.key to Calibration(0.5, 0.8, 1))
+        val cal = mutableMapOf(child.key to Calibration(0.5, 0.7, 2), driver.key to Calibration(0.45, 0.75, 1))
         route.depart()
         val log = StringBuilder()
         val stages = mutableListOf<Pair<Int, CareStage>>()
@@ -187,6 +189,14 @@ class DemoScenarioTest {
             val s = VehicleSnapshot(gear = route.gear, occupiedSeats = setOf(SeatPos.DRIVER, SeatPos.REAR_LEFT), cabinTempC = 25.5f,
                 recirculationOn = true, speedKph = route.speedKph.toFloat())
             planner.onVehicle(s)
+            if (route.curvyNow && route.gear == GearState.DRIVE) {
+                // 시연 모드와 같이 굽은 길에서는 한 분 안에서 조향을 흔든다.
+                listOf(5f, -5f).forEach { a ->
+                    nowMs += 18_000L
+                    planner.onVehicle(s.copy(steeringAngleDeg = a))
+                }
+                nowMs -= 36_000L
+            }
             val plan = planner.tick(s, RouteContext(route.location(), route.turnsAheadM()), people, cal, stops)
             stages += route.minute to plan.stage
             log.append("${route.minute} ${route.gear} km=${"%.1f".format(route.km)} ${plan.stage} focus=${plan.focus?.passenger?.label} ")
@@ -212,5 +222,29 @@ class DemoScenarioTest {
         val firstHeadsUp = stages.first { it.second == CareStage.HEADS_UP }.first
         val firstCare = stages.first { it.second == CareStage.CARE }.first
         assertTrue("heads-up before care: $firstHeadsUp < $firstCare", firstHeadsUp < firstCare)
+    }
+
+    @Test
+    fun cardKeepsTheSameStopUntilAnswered() {
+        val stops = loadStops()
+        val route = DemoRoute()
+        var nowMs = 13 * 3_600_000L
+        val planner = CarePlanner({ nowMs }, { ms -> ((ms / 3_600_000L) % 24).toInt() to ((ms / 60_000L) % 60).toInt() })
+        val child = Passenger("child", Role.CHILD, SeatPos.REAR_LEFT)
+        val people = listOf(Passenger("driver", Role.DRIVER, SeatPos.DRIVER), child)
+        val cal = mapOf(child.key to Calibration(0.5, 0.7, 2))
+        route.depart()
+        val shown = mutableListOf<String>()
+        while (route.minute < 30) {
+            val s = VehicleSnapshot(gear = route.gear, cabinTempC = 25.5f, recirculationOn = true, speedKph = route.speedKph.toFloat())
+            planner.onVehicle(s)
+            val plan = planner.tick(s, RouteContext(route.location(), route.turnsAheadM()), people, cal, stops)
+            if (plan.stage == CareStage.CARE) shown += plan.choice!!.stop.stop.name
+            route.advance(); nowMs += 60_000L
+        }
+        println(shown)
+        assertTrue(shown.isNotEmpty())
+        // 카드가 떠 있는 동안(지나치기 전까지)은 같은 쉼터를 말한다. 받아들이지 않고 지나치면 다음 기회로 넘어간다.
+        assertTrue("$shown", shown.size >= 8 && shown.take(8).distinct().size == 1)
     }
 }

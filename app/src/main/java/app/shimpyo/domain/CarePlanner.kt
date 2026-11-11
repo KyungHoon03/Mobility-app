@@ -61,6 +61,8 @@ class CarePlanner(
     var accepted: CarePlan? = null
         private set
     private var dismissedStop: String? = null
+    /** 챙김 카드를 띄운 뒤에는 고른 쉼터를 고정한다(카드가 보이는 동안 장소가 바뀌지 않게). */
+    private var locked: RestOpportunity.Choice? = null
     private var urgentKey: String? = null
     private var urgentUntilMs = 0L
 
@@ -140,10 +142,14 @@ class CarePlanner(
         val focus = people.minByOrNull { it.margin.point ?: Double.MAX_VALUE }!!
         val deadline = focus.margin.point
         val prefer = focus.passenger.role == Role.CHILD
-        val choice = deadline?.let {
+        val fresh = deadline?.let {
             if (focus.passenger.condition == Condition.MOTION_SICKNESS) RestOpportunity.chooseForMotion(ahead, it, minutesToCurvy, prefer)
             else RestOpportunity.choose(ahead, it, prefer)
         }
+        // 고정한 쉼터는 가까워지며 옆으로 비껴 보여도 지나치기 전까지 유지한다(뒤쪽 100° 밖이거나 0.5km 안이면 지난 것으로 본다).
+        val lockedNow = locked?.let { l -> route.location?.let { loc -> RestOpportunity.track(l.stop.stop, loc, speed)?.let { l.copy(stop = it) } } }
+        if (locked != null && lockedNow == null) locked = null
+        val choice = lockedNow ?: fresh
         val companion = people.filter { it !== focus }
             .firstOrNull { other -> other.margin.point != null && choice != null && other.margin.point <= choice.stop.etaMin + COMPANION_WINDOW_MIN }
 
@@ -155,6 +161,7 @@ class CarePlanner(
             deadline <= HEADS_UP_MIN -> CareStage.HEADS_UP
             else -> CareStage.WATCH
         }
+        if (stage == CareStage.CARE && locked == null) locked = choice
         return CarePlan(stage, people, focus, choice, minutesToCurvy, companion = companion, continuousDrivingMin = continuousDrivingMin, hour = hour)
     }
 
@@ -171,18 +178,21 @@ class CarePlanner(
             if (target != null) arrivalQuestion = ArrivalQuestion(target, loads[target.key] ?: 0.0, viaPlan = plan != null)
             accepted = null
             dismissedStop = null
+            locked = null
         }
         lastGear = gear
     }
 
     fun accept(plan: CarePlan) {
         accepted = plan
+        locked = null
         urgentKey = null
     }
 
     fun dismiss(plan: CarePlan) {
         dismissedStop = plan.choice?.stop?.stop?.name
         urgentKey = null
+        locked = null
     }
 
     /** 동승자가 누른 "지금 불편해요". 그 순간의 통 채움 정도를 돌려준다(학습용). */
@@ -201,7 +211,7 @@ class CarePlanner(
     fun reset() {
         loads.clear(); lastTickMs = null; continuousDrivingMin = 0.0; parkedMin = 0.0
         recirculationSinceMs = null; lastGear = GearState.UNKNOWN; drivenThisLegMin = 0.0
-        accepted = null; dismissedStop = null; urgentKey = null; arrivalQuestion = null
+        accepted = null; dismissedStop = null; urgentKey = null; arrivalQuestion = null; locked = null
         changeIndex.reset()
     }
 

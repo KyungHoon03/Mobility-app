@@ -241,7 +241,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 settings = Settings(seats = mapOf(SeatPos.REAR_LEFT to Role.CHILD), caffeineOk = records.settings.caffeineOk),
                 calibrations = mapOf(
                     "child|${Condition.MOTION_SICKNESS.name}" to Calibration(0.5, 0.7, 2),
-                    "$DRIVER|${Condition.DROWSINESS.name}" to Calibration(0.5, 0.8, 1),
+                    "$DRIVER|${Condition.DROWSINESS.name}" to Calibration(0.45, 0.75, 1),
                 ),
             )
             demo = DemoDrive().also { it.vehicle.start() }

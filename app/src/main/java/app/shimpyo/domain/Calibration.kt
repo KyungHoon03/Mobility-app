@@ -27,7 +27,8 @@ data class Calibration(val lo: Double = 0.5, val hi: Double = 1.0, val answers: 
     }.copy(answers = answers + 1)
 
     private fun below(load: Double): Calibration {
-        val newHi = min(hi, max(load, FLOOR))
+        // 한 번의 신호로 범위가 무너지지 않도록, 위 한계는 한 번에 최대 30%까지만 내린다.
+        val newHi = min(hi, maxOf(load, hi * MAX_STEP_DOWN, FLOOR))
         val newLo = if (lo < newHi) lo else newHi * 0.8
         return copy(lo = max(newLo, FLOOR * 0.8), hi = newHi)
     }
@@ -41,5 +42,6 @@ data class Calibration(val lo: Double = 0.5, val hi: Double = 1.0, val answers: 
     companion object {
         const val FLOOR = 0.2
         const val CEILING = 2.0
+        const val MAX_STEP_DOWN = 0.7
     }
 }

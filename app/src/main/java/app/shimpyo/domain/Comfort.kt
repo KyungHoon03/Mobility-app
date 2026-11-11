@@ -137,12 +137,16 @@ object Forecaster {
         return null
     }
 
+    /** 지금의 흔들림(가다 서다)은 지표의 창(10분) 동안만 이어진다고 보고 서서히 줄인다. 앞으로의 굽은 길은 회전 안내로 따로 넣는다. */
+    private fun changeAt(ctx: DriveContext, t: Double) = ctx.drivingChange * (1.0 - t / CHANGE_FADE_MIN).coerceIn(0.0, 1.0)
+    private const val CHANGE_FADE_MIN = 10.0
+
     fun rateAt(p: Passenger, t: Double, ctx: DriveContext, route: RouteAhead = RouteAhead(ctx.turnDistancesM, ctx.speedKph)): Double =
         when (p.condition) {
-            Condition.MOTION_SICKNESS -> ComfortRates.motion(route.curvyFraction(t), ctx.drivingChange, p.seat.isRear)
+            Condition.MOTION_SICKNESS -> ComfortRates.motion(route.curvyFraction(t), changeAt(ctx, t), p.seat.isRear)
             Condition.DROWSINESS -> {
                 val hour = ((ctx.nowHour * 60 + ctx.nowMinuteOfHour + t.toInt()) / 60) % 24
-                ComfortRates.drowsy(ctx.continuousDrivingMin + t, hour, ctx.drivingChange, ctx.cabinTempC, ctx.recirculationMin + t)
+                ComfortRates.drowsy(ctx.continuousDrivingMin + t, hour, changeAt(ctx, t), ctx.cabinTempC, ctx.recirculationMin + t)
             }
         }
 

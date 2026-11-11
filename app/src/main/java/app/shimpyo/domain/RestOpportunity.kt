@@ -78,6 +78,14 @@ object RestOpportunity {
         return choose(ahead, deadlineMin, preferServiceArea)
     }
 
+    /** 이미 고른 쉼터의 도착 예상 시간을 다시 구한다. 지나쳤으면 null. */
+    fun track(stop: RestStop, location: CarLocation, speedKph: Double): StopEta? {
+        val d = Geo.distanceKm(location.point, stop.point)
+        val angle = Geo.angleDiff(Geo.bearingDeg(location.point, stop.point), location.headingDeg)
+        if (d < 0.5 || angle > 100.0) return null
+        return StopEta(stop, d, d * ROAD_FACTOR / (max(speedKph, RouteAhead.MIN_SPEED_KPH) / 60.0))
+    }
+
     /** 지금 바로 쉬어야 할 때(지금 불편해요): 가장 가까운 곳. */
     fun nearest(ahead: List<StopEta>, preferServiceArea: Boolean): Choice? {
         val near = ahead.take(3)
