@@ -133,7 +133,7 @@ class CarePlanner(
             val focus = people.firstOrNull { it.passenger.key == urgentKey }
             if (focus != null) {
                 return CarePlan(
-                    CareStage.CARE, people, focus, RestOpportunity.nearest(ahead, focus.passenger.role == Role.CHILD),
+                    CareStage.CARE, people, focus, RestOpportunity.nearest(ahead, focus.passenger.role == Role.PASSENGER),
                     minutesToCurvy, urgent = true, continuousDrivingMin = continuousDrivingMin, hour = hour,
                 )
             }
@@ -141,7 +141,7 @@ class CarePlanner(
 
         val focus = people.minByOrNull { it.margin.point ?: Double.MAX_VALUE }!!
         val deadline = focus.margin.point
-        val prefer = focus.passenger.role == Role.CHILD
+        val prefer = focus.passenger.role == Role.PASSENGER
         val fresh = deadline?.let {
             if (focus.passenger.condition == Condition.MOTION_SICKNESS) RestOpportunity.chooseForMotion(ahead, it, minutesToCurvy, prefer)
             else RestOpportunity.choose(ahead, it, prefer)

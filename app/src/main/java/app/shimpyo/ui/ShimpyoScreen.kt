@@ -206,16 +206,17 @@ private fun ParkedScreen(state: UiState, vm: MainViewModel) {
                 OutlinedButton(onClick = vm::clearRestCare) { Text("닫기") }
             }
         }
-        Section("오늘 함께 탄 사람") {
-            Text("차는 어느 자리에 사람이 있는지만 알아요. 출발 전에 누가 앉았는지 골라 주세요.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Section("챙길 탑승자분 체크") {
+            Text("체크한 자리의 탑승자분만 챙겨요. 차는 사람이 앉았는지만 알아요. 운전자님은 항상 챙겨요.", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            listOf(SeatPos.FRONT_PASSENGER to "조수석", SeatPos.REAR_LEFT to "뒷좌석 왼쪽", SeatPos.REAR_RIGHT to "뒷좌석 오른쪽").forEach { (seat, name) ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(name, fontSize = 20.sp, modifier = Modifier.width(170.dp))
-                    val current = state.settings.seats[seat]
-                    FilterChip(selected = current == null, onClick = { vm.setSeat(seat, null) }, label = { Text("비어 있음", fontSize = 18.sp) })
-                    FilterChip(selected = current == Role.CHILD, onClick = { vm.setSeat(seat, Role.CHILD) }, label = { Text("아이", fontSize = 18.sp) })
-                    FilterChip(selected = current == Role.ADULT, onClick = { vm.setSeat(seat, Role.ADULT) }, label = { Text("어른", fontSize = 18.sp) })
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                listOf(SeatPos.FRONT_PASSENGER, SeatPos.REAR_LEFT, SeatPos.REAR_CENTER, SeatPos.REAR_RIGHT).forEach { seat ->
+                    val sat = seat in state.vehicle.occupiedSeats
+                    FilterChip(
+                        selected = seat in state.settings.checkedSeats,
+                        onClick = { vm.toggleSeat(seat) },
+                        label = { Text(seat.korean + if (sat) " · 착석" else "", fontSize = 18.sp) },
+                    )
                 }
             }
         }

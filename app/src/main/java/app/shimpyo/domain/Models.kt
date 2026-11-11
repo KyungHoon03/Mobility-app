@@ -9,10 +9,19 @@ enum class SeatPos {
     DRIVER, FRONT_PASSENGER, REAR_LEFT, REAR_CENTER, REAR_RIGHT;
 
     val isRear: Boolean get() = this == REAR_LEFT || this == REAR_CENTER || this == REAR_RIGHT
+
+    /** 화면과 카드에 쓰는 자리 이름. "뒷좌석"만으로는 누구인지 알 수 없으므로 정확한 자리를 쓴다. */
+    val korean: String get() = when (this) {
+        DRIVER -> "운전석"
+        FRONT_PASSENGER -> "조수석"
+        REAR_LEFT -> "뒷좌석 왼쪽"
+        REAR_CENTER -> "뒷좌석 가운데"
+        REAR_RIGHT -> "뒷좌석 오른쪽"
+    }
 }
 
-/** 탑승자 종류. 운전자는 졸음, 동승자는 멀미를 주로 챙긴다. */
-enum class Role { DRIVER, CHILD, ADULT }
+/** 운전자는 졸음, 탑승자분은 멀미를 주로 챙긴다. 차는 누가 앉았는지(나이 등)는 모르고, 앉았는지만 안다. */
+enum class Role { DRIVER, PASSENGER }
 
 /** Pleos Vehicle SDK·AAOS 표준 속성에서 읽은 차량 상태 한 장면. 값이 없으면 null. */
 data class VehicleSnapshot(
@@ -40,15 +49,14 @@ data class RouteContext(
     val upcomingTurnDistancesM: List<Double> = emptyList(),
 )
 
-/** 차에 탄 한 사람. 좌석은 차가 알려 주고, 누구인지는 출발 전 정차 중에 고른다. */
+/** 차에 탄 한 사람. 착석은 차가 알려 주고, 챙길 자리는 출발 전 정차 중에 체크한다. 체크한 자리만 챙긴다. */
 data class Passenger(val profileId: String, val role: Role, val seat: SeatPos) {
     val condition: Condition get() = if (role == Role.DRIVER) Condition.DROWSINESS else Condition.MOTION_SICKNESS
 
     /** 카드에 쓰는 호칭. 사람이 문장의 주인공이 되도록 한다. */
     val label: String get() = when (role) {
         Role.DRIVER -> "운전자님"
-        Role.CHILD -> if (seat.isRear) "뒷좌석 아이" else "앞좌석 아이"
-        Role.ADULT -> if (seat.isRear) "뒷좌석 동승자" else "앞좌석 동승자"
+        Role.PASSENGER -> "${seat.korean} 탑승자분"
     }
 
     val key: String get() = "$profileId|${condition.name}"

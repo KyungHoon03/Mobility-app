@@ -40,7 +40,7 @@ object CareText {
         return when {
             plan.urgent && p.role == Role.DRIVER -> "운전자님이 졸려 보여요"
             plan.urgent -> "${subject(p)} 불편해해요"
-            p.role == Role.DRIVER -> "운전자님, 졸음이 오기 쉬운 때가 다가와요"
+            p.role == Role.DRIVER -> "운전자님, 잠깐 쉬어 갈 때가 다가와요"
             else -> "${subject(p)} 곧 힘들어질 수 있어요"
         }
     }

@@ -49,7 +49,7 @@ class RouteAheadTest {
 }
 
 class ForecasterTest {
-    private val child = Passenger("child", Role.CHILD, SeatPos.REAR_LEFT)
+    private val child = Passenger("seat_REAR_LEFT", Role.PASSENGER, SeatPos.REAR_LEFT)
     private val driver = Passenger("driver", Role.DRIVER, SeatPos.DRIVER)
     private fun ctx(turns: List<Double> = emptyList(), hour: Int = 11, cont: Double = 0.0) =
         DriveContext(hour, 0, cont, 0.0, 22.0, 0.0, 60.0, turns)
@@ -151,9 +151,9 @@ class RestOpportunityTest {
 class CareTextTest {
     @Test
     fun particlesFollowTheLastSyllable() {
-        val child = Passenger("child", Role.CHILD, SeatPos.REAR_LEFT)
+        val child = Passenger("seat_REAR_LEFT", Role.PASSENGER, SeatPos.REAR_LEFT)
         val driver = Passenger("driver", Role.DRIVER, SeatPos.DRIVER)
-        assertEquals("뒷좌석 아이가", CareText.subject(child))
+        assertEquals("뒷좌석 왼쪽 탑승자분이", CareText.subject(child))
         assertEquals("운전자님이", CareText.subject(driver))
         assertEquals("운전자님은", CareText.topic(driver))
     }
@@ -177,7 +177,7 @@ class DemoScenarioTest {
         val route = DemoRoute()
         var nowMs = 13 * 3_600_000L
         val planner = CarePlanner({ nowMs }, { ms -> ((ms / 3_600_000L) % 24).toInt() to ((ms / 60_000L) % 60).toInt() })
-        val child = Passenger("child", Role.CHILD, SeatPos.REAR_LEFT)
+        val child = Passenger("seat_REAR_LEFT", Role.PASSENGER, SeatPos.REAR_LEFT)
         val driver = Passenger("driver", Role.DRIVER, SeatPos.DRIVER)
         val people = listOf(driver, child)
         val cal = mutableMapOf(child.key to Calibration(0.5, 0.7, 2), driver.key to Calibration(0.45, 0.75, 1))
@@ -230,7 +230,7 @@ class DemoScenarioTest {
         val route = DemoRoute()
         var nowMs = 13 * 3_600_000L
         val planner = CarePlanner({ nowMs }, { ms -> ((ms / 3_600_000L) % 24).toInt() to ((ms / 60_000L) % 60).toInt() })
-        val child = Passenger("child", Role.CHILD, SeatPos.REAR_LEFT)
+        val child = Passenger("seat_REAR_LEFT", Role.PASSENGER, SeatPos.REAR_LEFT)
         val people = listOf(Passenger("driver", Role.DRIVER, SeatPos.DRIVER), child)
         val cal = mapOf(child.key to Calibration(0.5, 0.7, 2))
         route.depart()

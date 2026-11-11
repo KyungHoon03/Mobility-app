@@ -117,12 +117,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 좌석 착석 정보와 출발 전 고른 사람을 합쳐 지금 차에 탄 사람을 만든다. */
     private fun passengers(s: VehicleSnapshot): List<Passenger> = buildList {
         add(Passenger(DRIVER, Role.DRIVER, SeatPos.DRIVER))
-        active.settings.seats.forEach { (seat, role) ->
-            if (seat in s.occupiedSeats || demo != null) add(Passenger(profileOf(role), role, seat))
+        active.settings.checkedSeats.sortedBy { it.ordinal }.forEach { seat ->
+            if (seat in s.occupiedSeats || demo != null) add(Passenger(profileOf(seat), Role.PASSENGER, seat))
         }
     }
 
-    private fun profileOf(role: Role) = when (role) { Role.DRIVER -> DRIVER; Role.CHILD -> "child"; Role.ADULT -> "adult" }
+    /** 누구인지 모르므로 자리별로 기록한다(그 자리에 앉는 탑승자분의 리듬). */
+    private fun profileOf(seat: SeatPos) = "seat_${seat.name}"
 
     private fun tick() {
         val snapshot = vehicle.snapshot.value
@@ -218,10 +219,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- 설정 ----
 
-    fun setSeat(seat: SeatPos, role: Role?) = updateRecords { r ->
-        val seats = r.settings.seats.toMutableMap()
-        if (role == null) seats.remove(seat) else seats[seat] = role
-        r.copy(settings = r.settings.copy(seats = seats))
+    fun toggleSeat(seat: SeatPos) = updateRecords { r ->
+        val seats = r.settings.checkedSeats.toMutableSet()
+        if (!seats.add(seat)) seats.remove(seat)
+        r.copy(settings = r.settings.copy(checkedSeats = seats))
     }
 
     fun setCaffeineOk(ok: Boolean) = updateRecords { it.copy(settings = it.settings.copy(caffeineOk = ok)) }
@@ -232,15 +233,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         napEndsAtReal = null
         _ui.update { it.copy(restCare = null, choosingWho = false) }
         if (d == null) {
-            // 시연 시나리오: 오후 1시 출발, 뒷좌석에 아이. 지난 여행에서 쌓인 기록이 있다고 가정한다(시연용, 실제 기록과 분리).
+            // 시연 시나리오: 오후 1시 출발, 뒷좌석 왼쪽 탑승자분 체크. 지난 여행에서 쌓인 기록이 있다고 가정한다(시연용, 실제 기록과 분리).
             demoBase = Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 13); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
             }.timeInMillis
             demoStartReal = System.currentTimeMillis()
             demoRecords = Records(
-                settings = Settings(seats = mapOf(SeatPos.REAR_LEFT to Role.CHILD), caffeineOk = records.settings.caffeineOk),
+                settings = Settings(checkedSeats = setOf(SeatPos.REAR_LEFT), caffeineOk = records.settings.caffeineOk),
                 calibrations = mapOf(
-                    "child|${Condition.MOTION_SICKNESS.name}" to Calibration(0.5, 0.7, 2),
+                    "seat_REAR_LEFT|${Condition.MOTION_SICKNESS.name}" to Calibration(0.5, 0.7, 2),
                     "$DRIVER|${Condition.DROWSINESS.name}" to Calibration(0.45, 0.75, 1),
                 ),
             )

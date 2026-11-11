@@ -3,15 +3,14 @@ package app.shimpyo.data
 import android.content.Context
 import app.shimpyo.domain.Calibration
 import app.shimpyo.domain.CareEvent
-import app.shimpyo.domain.Role
 import app.shimpyo.domain.SeatPos
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 data class Settings(
-    /** 좌석마다 누가 앉는지(출발 전 정차 중에 고름). 운전석은 항상 운전자. */
-    val seats: Map<SeatPos, Role> = mapOf(SeatPos.REAR_LEFT to Role.CHILD),
+    /** 챙길 자리(출발 전 정차 중에 체크). 운전석은 항상 챙긴다. 체크하지 않은 자리는 챙기지 않는다. */
+    val checkedSeats: Set<SeatPos> = emptySet(),
     val caffeineOk: Boolean = true,
 )
 
@@ -26,7 +25,7 @@ data class Records(
  * 기록은 차 안(앱 내부 저장소)에만 저장한다. 서버로 보내지 않는다.
  */
 class RecordStore(context: Context) {
-    private val file = File(context.filesDir, "shimpyo_v2.json")
+    private val file = File(context.filesDir, "shimpyo_v3.json")
 
     @Synchronized
     fun load(): Records {
@@ -34,12 +33,10 @@ class RecordStore(context: Context) {
         return runCatching {
             val root = JSONObject(file.readText())
             val s = root.optJSONObject("settings")
-            val seats = s?.optJSONObject("seats")?.let { o ->
-                o.keys().asSequence().mapNotNull { k ->
-                    runCatching { SeatPos.valueOf(k) to Role.valueOf(o.getString(k)) }.getOrNull()
-                }.toMap()
-            } ?: Settings().seats
-            val settings = Settings(seats = seats, caffeineOk = s?.optBoolean("caffeineOk", true) ?: true)
+            val seats = s?.optJSONArray("checkedSeats")?.let { a ->
+                (0 until a.length()).mapNotNull { runCatching { SeatPos.valueOf(a.getString(it)) }.getOrNull() }.toSet()
+            } ?: emptySet()
+            val settings = Settings(checkedSeats = seats, caffeineOk = s?.optBoolean("caffeineOk", true) ?: true)
             val cal = root.optJSONObject("calibrations")?.let { o ->
                 o.keys().asSequence().associateWith { k ->
                     o.getJSONObject(k).let { Calibration(it.getDouble("lo"), it.getDouble("hi"), it.optInt("n")) }
@@ -58,7 +55,7 @@ class RecordStore(context: Context) {
     fun save(r: Records) {
         val root = JSONObject()
         root.put("settings", JSONObject().apply {
-            put("seats", JSONObject().apply { r.settings.seats.forEach { (seat, role) -> put(seat.name, role.name) } })
+            put("checkedSeats", JSONArray().apply { r.settings.checkedSeats.forEach { put(it.name) } })
             put("caffeineOk", r.settings.caffeineOk)
         })
         root.put("calibrations", JSONObject().apply {

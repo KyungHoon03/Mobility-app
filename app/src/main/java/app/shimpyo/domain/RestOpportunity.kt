@@ -54,7 +54,7 @@ object RestOpportunity {
 
     /**
      * @param deadlineMin 가장 먼저 힘들어질 사람의 여유(분).
-     * @param preferServiceArea 아이처럼 화장실·매점이 필요한 사람이 기준이면 휴게소를 우선한다.
+     * @param preferServiceArea 탑승자분이 기준이면 화장실·매점이 있는 휴게소를 우선한다.
      */
     fun choose(ahead: List<StopEta>, deadlineMin: Double, preferServiceArea: Boolean): Choice? {
         if (ahead.isEmpty()) return null
